@@ -33,7 +33,7 @@ def test_missing_api_key(mock_env_get, capsys):
 @patch('connectors.youtube.extractor.genai.Client')
 @patch('os.environ.get')
 def test_successful_extraction_json(mock_env_get, mock_client, tmp_path):
-    mock_env_get.side_effect = lambda k: "fake_key" if k == "GEMINI_API_KEY" else None
+    mock_env_get.side_effect = lambda k, default=None: "fake_key" if k == "GEMINI_API_KEY" else default
     
     mock_instance = MagicMock()
     mock_client.return_value = mock_instance
@@ -60,7 +60,7 @@ def test_successful_extraction_json(mock_env_get, mock_client, tmp_path):
 @patch('connectors.youtube.extractor.genai.Client')
 @patch('os.environ.get')
 def test_successful_extraction_markdown(mock_env_get, mock_client, tmp_path):
-    mock_env_get.side_effect = lambda k: "fake_key" if k == "GEMINI_API_KEY" else None
+    mock_env_get.side_effect = lambda k, default=None: "fake_key" if k == "GEMINI_API_KEY" else default
     
     mock_instance = MagicMock()
     mock_client.return_value = mock_instance
@@ -86,7 +86,7 @@ def test_successful_extraction_markdown(mock_env_get, mock_client, tmp_path):
 @patch('connectors.youtube.extractor.genai.Client')
 @patch('os.environ.get')
 def test_model_fallback(mock_env_get, mock_client, tmp_path):
-    mock_env_get.side_effect = lambda k: "fake_key" if k == "GEMINI_API_KEY" else None
+    mock_env_get.side_effect = lambda k, default=None: "fake_key" if k == "GEMINI_API_KEY" else default
     
     mock_instance = MagicMock()
     mock_client.return_value = mock_instance
@@ -94,7 +94,7 @@ def test_model_fallback(mock_env_get, mock_client, tmp_path):
     # First call fails with 503, second call succeeds
     def mock_generate(*args, **kwargs):
         if kwargs.get('model') == 'gemini-3.8-flash':
-            raise APIError("503 Service Unavailable", code=503)
+            raise APIError(503, {"error": {"message": "503 Service Unavailable", "code": 503}})
         
         response = MagicMock()
         response.text = '{"status": "fallback_success"}'

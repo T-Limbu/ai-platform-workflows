@@ -22,6 +22,10 @@ on:
         type: string
         default: "gemini-3.8-flash"
         description: "The model to use"
+    secrets:
+      GEMINI_API_KEY:
+        required: false
+        description: "Google Gemini API Key (inherited or passed from caller)"
     outputs:
       extracted_content:
         description: "The extracted content"

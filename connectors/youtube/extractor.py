@@ -71,15 +71,11 @@ def main():
             used_model = model
             break
         except APIError as e:
-            if e.code in (503, 404):
-                print(f"Model {model} failed with {e.code}, trying next model...", file=sys.stderr)
-                continue
-            else:
-                print(f"Error generating content with {model}: {e}", file=sys.stderr)
-                sys.exit(1)
+            print(f"Model {model} failed with APIError {e.code}: {e}", file=sys.stderr)
+            continue
         except Exception as e:
-            print(f"Error generating content with {model}: {e}", file=sys.stderr)
-            sys.exit(1)
+            print(f"Model {model} failed with error: {e}", file=sys.stderr)
+            continue
             
     if extracted_content is None:
         print("Error: All models failed to generate content.", file=sys.stderr)
