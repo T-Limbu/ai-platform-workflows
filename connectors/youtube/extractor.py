@@ -106,8 +106,8 @@ def main():
         # Multiline output in GitHub Actions
         delimiter = "EOF"
         with open(github_output, "a", encoding="utf-8") as f:
-            f.write(f"output_file={output_filename}\\n")
-            f.write(f"extracted_content<<{delimiter}\\n{content_to_save}\\n{delimiter}\\n")
+            f.write(f"output_file={output_filename}\n")
+            f.write(f"extracted_content<<{delimiter}\n{content_to_save}\n{delimiter}\n")
 
     print(f"Extraction successful using {used_model}. Output saved to {output_filename}")
 
