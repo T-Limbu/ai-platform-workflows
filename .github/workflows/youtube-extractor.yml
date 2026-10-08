@@ -59,19 +59,26 @@ jobs:
       extracted_content: ${{ steps.run-extractor.outputs.extracted_content }}
       output_file: ${{ steps.run-extractor.outputs.output_file }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout squad-workflows
+        uses: actions/checkout@v4
+        with:
+          repository: T-Limbu/squad-workflows
+          path: .squad-workflows
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: Install dependencies
         run: pip install google-genai
+
       - name: Run Extraction Script
         id: run-extractor
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          python connectors/youtube/extractor.py --url "${{ inputs.video_url }}" --prompt "${{ inputs.prompt }}" --format "${{ inputs.output_format }}" --model "${{ inputs.model }}"
+          python .squad-workflows/connectors/youtube/extractor.py --url "${{ inputs.video_url }}" --prompt "${{ inputs.prompt }}" --format "${{ inputs.output_format }}" --model "${{ inputs.model }}"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
