@@ -1,0 +1,64 @@
+name: Reusable CI Test Gate
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        description: 'Node.js version to use'
+        required: false
+        type: string
+        default: '20'
+      working_directory:
+        description: 'Directory where dependencies and tests are located'
+        required: false
+        type: string
+        default: '.'
+      install_command:
+        description: 'Command to install project dependencies'
+        required: false
+        type: string
+        default: 'npm ci || npm install'
+      test_command:
+        description: 'Command to run test suite'
+        required: false
+        type: string
+        default: 'npm test'
+      run_lint:
+        description: 'Whether to run a linter check'
+        required: false
+        type: boolean
+        default: false
+      lint_command:
+        description: 'Command to run linter'
+        required: false
+        type: string
+        default: 'npm run lint'
+
+jobs:
+  test:
+    name: Test Suite Guard
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ inputs.node_version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: 'npm'
+          cache-dependency-path: ${{ inputs.working_directory }}/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.install_command }}
+
+      - name: Run Linter Guard
+        if: ${{ inputs.run_lint }}
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.lint_command }}
+
+      - name: Run Test Suite
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.test_command }}
