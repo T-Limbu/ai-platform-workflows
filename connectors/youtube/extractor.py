@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import re
+import uuid
 from google import genai
 from google.genai import types
 from google.genai.errors import APIError
@@ -104,7 +105,9 @@ def main():
     github_output = os.environ.get("GITHUB_OUTPUT")
     if github_output:
         # Multiline output in GitHub Actions
-        delimiter = "EOF"
+        delimiter = f"EOF_{uuid.uuid4().hex}"
+        while delimiter in content_to_save:
+            delimiter = f"EOF_{uuid.uuid4().hex}"
         with open(github_output, "a", encoding="utf-8") as f:
             f.write(f"output_file={output_filename}\n")
             f.write(f"extracted_content<<{delimiter}\n{content_to_save}\n{delimiter}\n")

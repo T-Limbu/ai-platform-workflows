@@ -22,6 +22,11 @@ on:
         type: string
         default: "gemini-3.8-flash"
         description: "The model to use"
+      workflows_ref:
+        required: false
+        type: string
+        default: "main"
+        description: "ref of ai-platform-workflows to run; pass the same SHA you pinned in uses:"
     secrets:
       GEMINI_API_KEY:
         required: false
@@ -59,10 +64,11 @@ jobs:
       extracted_content: ${{ steps.run-extractor.outputs.extracted_content }}
       output_file: ${{ steps.run-extractor.outputs.output_file }}
     steps:
-      - name: Checkout squad-workflows
+      - name: Checkout ai-platform-workflows
         uses: actions/checkout@v4
         with:
-          repository: T-Limbu/squad-workflows
+          repository: T-Limbu/ai-platform-workflows
+          ref: ${{ github.repository == 'T-Limbu/ai-platform-workflows' && github.sha || inputs.workflows_ref }}
           path: .squad-workflows
 
       - name: Set up Python 3.11
@@ -71,14 +77,19 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install google-genai
+        run: pip install -r .squad-workflows/connectors/youtube/requirements.txt
 
       - name: Run Extraction Script
         id: run-extractor
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          VIDEO_URL: ${{ inputs.video_url }}
+          PROMPT: ${{ inputs.prompt }}
+          OUTPUT_FORMAT: ${{ inputs.output_format }}
+          MODEL: ${{ inputs.model }}
         run: |
-          python .squad-workflows/connectors/youtube/extractor.py --url "${{ inputs.video_url }}" --prompt "${{ inputs.prompt }}" --format "${{ inputs.output_format }}" --model "${{ inputs.model }}"
+          python .squad-workflows/connectors/youtube/extractor.py --url "$VIDEO_URL" --prompt "$PROMPT" --format "$OUTPUT_FORMAT" --model "$MODEL"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

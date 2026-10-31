@@ -47,6 +47,11 @@ on:
         required: false
         type: string
         default: 'do_not_clear'
+      deploy_environment:
+        description: 'GitHub environment of the calling repo that gates this job (production or qa). Default production is gated once the owner adds required reviewers.'
+        required: false
+        type: string
+        default: 'production'
       archive_artifact:
         description: 'Whether to upload build artifact to GitHub Actions'
         required: false
@@ -61,12 +66,37 @@ jobs:
   build-and-deploy:
     name: Package & Deploy Release
     runs-on: ubuntu-latest
+    environment: ${{ inputs.deploy_environment }}
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.commit_sha != '' && inputs.commit_sha || github.sha }}
+
+      - name: Validate Inputs and Resolve Deploy Commit
+        env:
+          CLEAR_CACHE: ${{ inputs.clear_cache }}
+          SERVICE_ID: ${{ inputs.service_id }}
+          DEPLOY_ENVIRONMENT: ${{ inputs.deploy_environment }}
+        run: |
+          if [ "$CLEAR_CACHE" != "clear" ] && [ "$CLEAR_CACHE" != "do_not_clear" ]; then
+            echo "::error::clear_cache must be 'clear' or 'do_not_clear'"
+            exit 1
+          fi
+          if ! printf '%s' "$SERVICE_ID" | grep -Eq '^srv-[a-z0-9]+$'; then
+            echo "::error::service_id must match ^srv-[a-z0-9]+$"
+            exit 1
+          fi
+          if [ "$DEPLOY_ENVIRONMENT" != "production" ] && [ "$DEPLOY_ENVIRONMENT" != "qa" ]; then
+            echo "::error::deploy_environment must be 'production' or 'qa'"
+            exit 1
+          fi
+          DEPLOY_SHA=$(git rev-parse --verify "HEAD^{commit}")
+          echo "Resolved deploy commit: ${DEPLOY_SHA}"
+          echo "DEPLOY_SHA=${DEPLOY_SHA}" >> "$GITHUB_ENV"
 
       - name: Setup Node.js ${{ inputs.node_version }}
         uses: actions/setup-node@v4
@@ -89,17 +119,23 @@ jobs:
 
       - name: Package Dist Artifact (Zip)
         id: package-zip
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          WORK_DIR: ${{ inputs.working_directory }}
+          DIST_DIR: ${{ inputs.dist_directory }}
         run: |
-          VERSION="${{ github.ref_name }}"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          VERSION="$REF_NAME"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             VERSION="manual-${GITHUB_SHA::7}"
           fi
-          ZIP_NAME="${{ github.event.repository.name }}-${VERSION}.zip"
-          cd "${{ inputs.working_directory }}/${{ inputs.dist_directory }}"
+          ZIP_NAME="${REPO_NAME}-${VERSION}.zip"
+          cd "${WORK_DIR}/${DIST_DIR}"
           zip -r "../${ZIP_NAME}" .
           cd -
-          echo "zip_path=${{ inputs.working_directory }}/${ZIP_NAME}" >> $GITHUB_OUTPUT
-          echo "zip_name=${ZIP_NAME}" >> $GITHUB_OUTPUT
+          echo "zip_path=${WORK_DIR}/${ZIP_NAME}" >> "$GITHUB_OUTPUT"
+          echo "zip_name=${ZIP_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Archive Build Artifact in Workflow
         if: ${{ inputs.archive_artifact }}
@@ -111,38 +147,85 @@ jobs:
 
       - name: Attach Package to GitHub Release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: ${{ steps.package-zip.outputs.zip_path }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Deploy Pinned Version to Render Production
+      - name: Deploy Pinned Version to Render and Wait for Result
         id: render-deploy
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE_ID: ${{ inputs.service_id }}
+          CLEAR_CACHE: ${{ inputs.clear_cache }}
         run: |
-          TARGET_COMMIT="${{ inputs.commit_sha != '' && inputs.commit_sha || github.sha }}"
-          CLEAR_CACHE="${{ inputs.clear_cache }}"
+          BASE_URL="https://api.render.com/v1/services/${SERVICE_ID}/deploys"
+          echo "Deploying commit ${DEPLOY_SHA} to Render service ${SERVICE_ID}..."
 
-          echo "Deploying target commit: ${TARGET_COMMIT} to Render service ${{ inputs.service_id }}..."
-
-          RESPONSE=$(curl -fsSL -X POST "https://api.render.com/v1/services/${{ inputs.service_id }}/deploys" \
-            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+          BODY=$(jq -n --arg c "$DEPLOY_SHA" --arg cc "$CLEAR_CACHE" '{commitId:$c, clearCache:$cc}')
+          RESPONSE=$(curl -fsS -X POST "$BASE_URL" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d "{\"commitId\": \"${TARGET_COMMIT}\", \"clearCache\": \"${CLEAR_CACHE}\"}")
+            -d "$BODY")
 
-          echo "Render API Response:"
-          echo "${RESPONSE}"
-
-          DEPLOY_ID=$(echo "${RESPONSE}" | grep -o '"id":"[^"]*' | head -n 1 | cut -d '"' -f 4)
+          DEPLOY_ID=$(printf '%s' "$RESPONSE" | jq -r '.id // empty')
+          if [ -z "$DEPLOY_ID" ]; then
+            echo "::error::Render did not return a deploy id"
+            exit 1
+          fi
           echo "Triggered Render Deploy ID: ${DEPLOY_ID}"
-          echo "DEPLOY_ID=${DEPLOY_ID}" >> $GITHUB_ENV
-          echo "DEPLOY_COMMIT=${TARGET_COMMIT}" >> $GITHUB_ENV
+          echo "DEPLOY_ID=${DEPLOY_ID}" >> "$GITHUB_ENV"
+          echo "DEPLOY_COMMIT=${DEPLOY_SHA}" >> "$GITHUB_ENV"
+
+          LAST_STATUS=""
+          FAILED_POLLS=0
+          for ATTEMPT in $(seq 1 80); do
+            if POLL=$(curl -fsS "${BASE_URL}/${DEPLOY_ID}" -H "Authorization: Bearer ${RENDER_API_KEY}") \
+              && STATUS=$(printf '%s' "$POLL" | jq -r '.status // empty') && [ -n "$STATUS" ]; then
+              FAILED_POLLS=0
+              if [ "$STATUS" != "$LAST_STATUS" ]; then
+                echo "Render deploy ${DEPLOY_ID} status: ${STATUS}"
+                LAST_STATUS="$STATUS"
+                echo "DEPLOY_STATUS=${STATUS}" >> "$GITHUB_ENV"
+              fi
+              case "$STATUS" in
+                live)
+                  exit 0
+                  ;;
+                build_failed|update_failed|pre_deploy_failed|canceled|deactivated)
+                  echo "::error::Render deploy ${DEPLOY_ID} ended with ${STATUS}"
+                  exit 1
+                  ;;
+              esac
+            else
+              FAILED_POLLS=$((FAILED_POLLS + 1))
+              echo "Poll ${ATTEMPT} failed (${FAILED_POLLS} in a row)"
+              if [ "$FAILED_POLLS" -ge 3 ]; then
+                echo "::error::Render deploy ${DEPLOY_ID}: 3 failed status polls in a row"
+                exit 1
+              fi
+            fi
+            if [ "$ATTEMPT" -lt 80 ]; then
+              sleep 15
+            fi
+          done
+          echo "::error::Render deploy ${DEPLOY_ID} not live after 20 minutes"
+          exit 1
 
       - name: Generate Deployment Summary
         if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          DEPLOY_ENVIRONMENT: ${{ inputs.deploy_environment }}
+          SERVICE_ID: ${{ inputs.service_id }}
         run: |
-          echo "### 🚀 Production Deployment Report" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status:** ${{ job.status == 'success' && '✅ Deployed' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Target Commit:** \`${{ env.DEPLOY_COMMIT || github.sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Render Deploy ID:** \`${{ env.DEPLOY_ID || 'N/A' }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Render Dashboard:** [View Service Events](https://dashboard.render.com/static/${{ inputs.service_id }})" >> $GITHUB_STEP_SUMMARY
+          if [ "$JOB_STATUS" = "success" ]; then RESULT="✅ Deployed"; else RESULT="❌ Failed"; fi
+          {
+            echo "### 🚀 Render deploy report (${DEPLOY_ENVIRONMENT})"
+            echo "- **Job:** ${RESULT}"
+            echo "- **Render status:** \`${DEPLOY_STATUS:-N/A}\`"
+            echo "- **Target Commit:** \`${DEPLOY_SHA:-N/A}\`"
+            echo "- **Render Deploy ID:** \`${DEPLOY_ID:-N/A}\`"
+            echo "- **Render Dashboard:** [View Service Events](https://dashboard.render.com/static/${SERVICE_ID})"
+          } >> "$GITHUB_STEP_SUMMARY"

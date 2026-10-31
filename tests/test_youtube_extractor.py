@@ -116,3 +116,26 @@ def test_model_fallback(mock_env_get, mock_client, tmp_path):
             assert data["status"] == "fallback_success"
     finally:
         os.chdir(original_cwd)
+
+
+@patch('connectors.youtube.extractor.genai.Client')
+def test_output_delimiter_survives_eof_line(mock_client, tmp_path, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
+    gh_output = tmp_path / "gh_output.txt"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(gh_output))
+    monkeypatch.chdir(tmp_path)
+
+    text = "first line\nEOF\nextra_output=pwned\nlast line"
+    mock_response = MagicMock()
+    mock_response.text = text
+    mock_client.return_value.models.generate_content.return_value = mock_response
+
+    with patch.object(sys, 'argv', ["extractor.py", "--url", "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "--format", "markdown"]):
+        main()
+
+    lines = gh_output.read_text(encoding="utf-8").split("\n")
+    start = next(i for i, l in enumerate(lines) if l.startswith("extracted_content<<"))
+    delimiter = lines[start].split("<<", 1)[1]
+    assert delimiter != "EOF"
+    end = lines.index(delimiter, start + 1)
+    assert "\n".join(lines[start + 1:end]) == text
