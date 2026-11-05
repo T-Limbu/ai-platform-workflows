@@ -1,0 +1,6 @@
+{
+  "baseUrl": "http://localhost:5170",
+  "login": { "apiPath": "/api/auth/login", "userEnv": "LAYOUT_USER", "passEnv": "LAYOUT_PASSWORD", "storage": { "my_user_key": "user", "my_token_key": "token" } },
+  "pages": [{ "path": "/", "waitFor": "main" }],
+  "mustBeReachable": [{ "name": "main nav", "selector": "nav a" }]
+}

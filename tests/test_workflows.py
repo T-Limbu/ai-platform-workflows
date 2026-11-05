@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
-FILES = ["youtube-extractor.yml", "render-release.yml"]
+FILES = ["youtube-extractor.yml", "render-release.yml", "layout-check.yml"]
 ALLOWED_INLINE_RUN = {
     "run: ${{ inputs.install_command }}",
     "run: ${{ inputs.test_command }}",

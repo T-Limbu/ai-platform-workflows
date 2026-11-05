@@ -116,3 +116,9 @@ jobs:
 `workflows_ref` (default `main`) selects which ref of this repo supplies `connectors/youtube/extractor.py`; pass the same tag you pinned in `uses:`. A dispatch inside this repo runs its own commit. Inputs reach the script only as environment variables, never pasted into shell source.
 
 Requires `GEMINI_API_KEY` configured in repository secrets.
+
+---
+
+### 3. Reusable Layout Check (`layout-check.yml`)
+
+Builds the app, starts it locally with a seeded login and checks every configured page at 320/360/414/768/1024/1440 px for sideways scroll, off-screen content, overlapping controls, clipped text and unreachable must-have elements (for example a hidden mobile nav). Report-only by default (`report_only: true`); set it to `false` to block merges. Module and config format: `layout-check/README.md`.

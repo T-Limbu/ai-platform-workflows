@@ -1,0 +1,97 @@
+name: Reusable Layout Check
+
+# Builds the caller app, starts it locally with a seeded login and runs layout-check/layout-check.mjs
+# at 320/360/414/768/1024/1440 px. Report-only by default; set report_only: false to block.
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        type: string
+        default: '20'
+      working_directory:
+        type: string
+        default: '.'
+      install_command:
+        type: string
+        default: 'npm ci || npm install'
+      build_command:
+        type: string
+        default: 'npm run build'
+      start_command:
+        description: 'Starts the app in the background. $LAYOUT_PASSWORD holds a random per-run password to seed as the test login.'
+        type: string
+        required: true
+      health_url:
+        type: string
+        required: true
+      config:
+        description: 'Layout config file, relative to working_directory'
+        type: string
+        required: true
+      layout_user:
+        description: 'Seeded login name the app creates in local dev'
+        type: string
+        default: ''
+      report_only:
+        type: boolean
+        default: true
+      workflows_ref:
+        description: 'Ref of ai-platform-workflows to take layout-check.mjs from'
+        type: string
+        default: 'main'
+
+jobs:
+  layout:
+    name: Layout Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout app
+        uses: actions/checkout@v4
+
+      - name: Checkout layout-check module
+        uses: actions/checkout@v4
+        with:
+          repository: T-Limbu/ai-platform-workflows
+          ref: ${{ inputs.workflows_ref }}
+          path: .layout-check-src
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: 'npm'
+          cache-dependency-path: ${{ inputs.working_directory }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working_directory }}
+        env:
+          CMD: ${{ inputs.install_command }}
+        run: bash -c "$CMD"
+
+      - name: Install Chromium
+        working-directory: ${{ inputs.working_directory }}
+        run: npx playwright install --with-deps chromium
+
+      - name: Build
+        working-directory: ${{ inputs.working_directory }}
+        env:
+          CMD: ${{ inputs.build_command }}
+        run: bash -c "$CMD"
+
+      - name: Start app and run layout check
+        working-directory: ${{ inputs.working_directory }}
+        env:
+          START_CMD: ${{ inputs.start_command }}
+          HEALTH_URL: ${{ inputs.health_url }}
+          LAYOUT_CONFIG: ${{ inputs.config }}
+          LAYOUT_USER: ${{ inputs.layout_user }}
+          REPORT_ONLY: ${{ inputs.report_only }}
+        run: |
+          export LAYOUT_PASSWORD="$(openssl rand -hex 16)"
+          echo "::add-mask::$LAYOUT_PASSWORD"
+          bash -c "$START_CMD" > "$RUNNER_TEMP/app.log" 2>&1 &
+          for i in $(seq 1 60); do curl -fsS "$HEALTH_URL" >/dev/null 2>&1 && break; sleep 2; done
+          curl -fsS "$HEALTH_URL" >/dev/null || { cat "$RUNNER_TEMP/app.log"; echo "app did not start"; exit 1; }
+          FLAG=""
+          [ "$REPORT_ONLY" = "true" ] && FLAG="--report-only"
+          node "$GITHUB_WORKSPACE/.layout-check-src/layout-check/layout-check.mjs" "$LAYOUT_CONFIG" $FLAG
