@@ -26,11 +26,12 @@ export function pageAudit({ mustBeReachable = [], ignoreSelector = '' }) {
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
   };
-  // an ancestor (below body) that scrolls or clips sideways makes overflow inside it intentional
+  // an ancestor (below body) that scrolls sideways makes overflow inside it intentional; overflow:hidden does not
+  // (it hides unreachable content, so that is still reported - mark deliberate cases with data-layout-ignore)
   const inScrollBox = (el) => {
     for (let p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
       const s = getComputedStyle(p);
-      if (/(auto|scroll|hidden|clip)/.test(s.overflowX) && p.scrollWidth > p.clientWidth) return true;
+      if (/(auto|scroll)/.test(s.overflowX) && p.scrollWidth > p.clientWidth) return true;
     }
     return false;
   };
@@ -122,7 +123,7 @@ export async function run(configPath, { reportOnly = false } = {}) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ [cfg.login.userField || 'identifier']: user, [cfg.login.passField || 'password']: pass }),
       });
-      const body = await res.json();
+      const body = await res.json().catch(() => ({ error: 'login endpoint did not return JSON' }));
       if (!res.ok || !body.token) throw new Error('layout check login failed (' + res.status + '): ' + (body.error || 'no token'));
       for (const [key, from] of Object.entries(cfg.login.storage)) storage[key] = JSON.stringify(from === 'token' ? body.token : { ...body.user, ...(cfg.login.userExtra || {}) });
     }
@@ -131,8 +132,9 @@ export async function run(configPath, { reportOnly = false } = {}) {
         const ctx = await browser.newContext({ viewport: { width, height: 800 }, hasTouch: width < 768, isMobile: width < 768 });
         if (cfg.login && !page.anonymous) await ctx.addInitScript((s) => { for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v); }, storage);
         const p = await ctx.newPage();
-        await p.goto(new URL(page.path, base).href, { waitUntil: 'networkidle' });
-        if (page.waitFor) await p.waitForSelector(page.waitFor, { timeout: 15000 });
+        await p.goto(new URL(page.path, base).href, { waitUntil: 'load' });
+        await p.waitForSelector(page.waitFor || 'body', { timeout: 15000 });
+        await p.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {}); // best effort: apps that poll never go idle
         await p.waitForTimeout(300);
         const landed = new URL(p.url()).pathname;
         if (landed !== new URL(page.path, base).pathname) throw new Error('layout check: ' + page.path + ' redirected to ' + landed + ' at ' + width + 'px (login not accepted by the app?)');

@@ -40,6 +40,13 @@ on:
         description: 'Ref of ai-platform-workflows to take layout-check.mjs from'
         type: string
         default: 'main'
+    secrets:
+      workflows_token:
+        description: 'Read-only token for T-Limbu/ai-platform-workflows (needed while that repo is private)'
+        required: false
+
+permissions:
+  contents: read
 
 jobs:
   layout:
@@ -55,6 +62,7 @@ jobs:
           repository: T-Limbu/ai-platform-workflows
           ref: ${{ inputs.workflows_ref }}
           path: .layout-check-src
+          token: ${{ secrets.workflows_token || github.token }}
 
       - uses: actions/setup-node@v4
         with:
