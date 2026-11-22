@@ -16,3 +16,7 @@ sideways-scrolling box is skipped automatically.
 
 Rollout: use `--report-only` (or `LAYOUT_REPORT_ONLY=true`) at first, then drop it to block.
 Version 1 checks the page as loaded only, not drawers, modals or menus.
+
+## Runner
+
+The workflow runs on `ubuntu-24.04`, not `ubuntu-latest`: Playwright does not support Chromium on Ubuntu 26.04 (what `ubuntu-latest` became in Nov 2026). Fixed in v1.1.1 (KSH-356).
